@@ -1,0 +1,8 @@
+{
+  "name": "Tesla Mobile App Clone",
+  "description": "A high-fidelity React-based reconstruction of the Tesla mobile application, featuring vehicle status monitoring, climate controls, charging management, and a Gemini-powered smart vehicle assistant.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
