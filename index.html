@@ -10,12 +10,24 @@
     <style>
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #000;
+            background-color: #0a0a0a; /* Dark background for desktop contrast */
             color: #fff;
             margin: 0;
             padding: 0;
-            overflow-x: hidden;
+            overflow: hidden;
             -webkit-tap-highlight-color: transparent;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            width: 100vw;
+        }
+        #root {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
         }
         /* Custom scrollbar for a cleaner mobile look */
         ::-webkit-scrollbar {

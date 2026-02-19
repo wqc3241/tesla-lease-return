@@ -6,7 +6,8 @@ export class GeminiService {
   private ai: GoogleGenAI;
 
   constructor() {
-    this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+    // Correctly initialize with API key from environment variable
+    this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   }
 
   async getVehicleAdvice(prompt: string, state: VehicleState) {
@@ -28,6 +29,7 @@ export class GeminiService {
           Respond in a concise, helpful, and professional tone, similar to an official vehicle interface.
         `,
       });
+      // Correctly access text property from response
       return response.text || "I'm sorry, I couldn't process that request right now.";
     } catch (error) {
       console.error("Gemini API Error:", error);
