@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { INITIAL_VEHICLE_STATE, INITIAL_LEASE_STATE, ICONS } from './constants';
 import { VehicleState, LeaseState, TabType, ChatMessage } from './types';
 import { gemini } from './geminiService';
@@ -66,6 +66,130 @@ const TimelineItem: React.FC<{
   </div>
 );
 
+const LeaseChatModal: React.FC<{ 
+    isOpen: boolean; 
+    onClose: () => void; 
+    leaseState: LeaseState;
+}> = ({ isOpen, onClose, leaseState }) => {
+    const [messages, setMessages] = useState<ChatMessage[]>([
+        { role: 'model', text: "Hello, I'm your Tesla Financial Assistant. How can I help with your lease return or billing today?" }
+    ]);
+    const [input, setInput] = useState('');
+    const [isTyping, setIsTyping] = useState(false);
+    const [isCalling, setIsCalling] = useState(false);
+    const scrollRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (scrollRef.current) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+    }, [messages, isTyping]);
+
+    const handleSend = async (customText?: string) => {
+        const textToSend = customText || input;
+        if (!textToSend.trim()) return;
+
+        const userMsg: ChatMessage = { role: 'user', text: textToSend };
+        setMessages(prev => [...prev, userMsg]);
+        setInput('');
+        setIsTyping(true);
+
+        // Contextual prompt for Lease
+        const contextualPrompt = `Lease Context: Days left: ${leaseState.daysLeft}, Mileage: ${leaseState.currentMileage}/${leaseState.allowedMileage}. 
+        User Query: ${textToSend}. 
+        Focus on return process, billing disputes, or loyalty offers.`;
+
+        const response = await gemini.getVehicleAdvice(contextualPrompt, INITIAL_VEHICLE_STATE);
+        setMessages(prev => [...prev, { role: 'model', text: response }]);
+        setIsTyping(false);
+    };
+
+    if (!isOpen) return null;
+
+    if (isCalling) {
+        return (
+            <div className="absolute inset-0 z-[900] bg-zinc-950 flex flex-col items-center justify-center p-12 text-center animate-in fade-in zoom-in duration-500">
+                <div className="w-32 h-32 bg-blue-500/10 rounded-full flex items-center justify-center mb-12 relative">
+                    <div className="absolute inset-0 bg-blue-500/20 rounded-full animate-ping"></div>
+                    <ICONS.Bot className="w-16 h-16 text-blue-500 relative z-10" />
+                </div>
+                <h3 className="text-2xl font-bold tracking-tight mb-2">Connecting...</h3>
+                <p className="text-zinc-500 text-sm font-medium">AI Voice Support Agent</p>
+                <div className="mt-20 flex gap-6">
+                    <button onClick={() => setIsCalling(false)} className="w-16 h-16 bg-tesla-red rounded-full flex items-center justify-center shadow-xl shadow-red-900/20 active:scale-95 transition-all">
+                        <svg className="w-8 h-8 text-white rotate-[135deg]" fill="currentColor" viewBox="0 0 24 24"><path d="M6.62,10.79C8.06,13.62 10.38,15.94 13.21,17.38L15.41,15.18C15.69,14.9 16.08,14.82 16.43,14.93C17.55,15.3 18.75,15.5 20,15.5A1,1 0 0,1 21,16.5V20A1,1 0 0,1 20,21A17,17 0 0,1 3,4A1,1 0 0,1 4,3H7.5A1,1 0 0,1 8.5,4C8.5,5.25 8.7,6.45 9.07,7.57C9.18,7.92 9.1,8.31 8.82,8.59L6.62,10.79Z" /></svg>
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="absolute inset-0 z-[850] bg-black flex flex-col animate-in slide-in-from-bottom duration-500">
+            <header className="p-6 flex justify-between items-center border-b border-zinc-900 bg-zinc-900/50 backdrop-blur-xl">
+                <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 bg-zinc-800 rounded-xl flex items-center justify-center border border-zinc-700">
+                        <ICONS.Bot className="w-4 h-4 text-blue-500" />
+                    </div>
+                    <div>
+                        <h2 className="text-sm font-bold">Lease Support</h2>
+                        <div className="flex items-center gap-1.5">
+                            <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
+                            <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">AI Online</span>
+                        </div>
+                    </div>
+                </div>
+                <button onClick={onClose} className="text-zinc-500 font-bold uppercase text-[10px] tracking-widest p-2">Close</button>
+            </header>
+
+            <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-6">
+                {messages.map((m, i) => (
+                    <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-[85%] px-5 py-3.5 rounded-3xl text-sm leading-relaxed shadow-sm ${m.role === 'user' ? 'bg-white text-black font-medium' : 'bg-zinc-900 text-zinc-300 border border-zinc-800'}`}>
+                            {m.text}
+                        </div>
+                    </div>
+                ))}
+                {isTyping && (
+                    <div className="flex justify-start">
+                        <div className="bg-zinc-900 px-5 py-3 rounded-3xl border border-zinc-800 flex gap-1 items-center">
+                            <div className="w-1 h-1 bg-zinc-600 rounded-full animate-bounce"></div>
+                            <div className="w-1 h-1 bg-zinc-600 rounded-full animate-bounce delay-75"></div>
+                            <div className="w-1 h-1 bg-zinc-600 rounded-full animate-bounce delay-150"></div>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            <div className="p-4 bg-zinc-950 border-t border-zinc-900 space-y-4">
+                <div className="flex gap-2 overflow-x-auto pb-2 px-1 no-scrollbar">
+                    <button onClick={() => handleSend("I want to dispute a damage charge.")} className="whitespace-now8 bg-zinc-900 border border-zinc-800 text-[10px] font-bold uppercase tracking-widest px-4 py-2 rounded-full active:bg-zinc-800 flex-shrink-0">Dispute Charge</button>
+                    <button onClick={() => handleSend("What are my options after return?")} className="whitespace-nowrap bg-zinc-900 border border-zinc-800 text-[10px] font-bold uppercase tracking-widest px-4 py-2 rounded-full active:bg-zinc-800 flex-shrink-0">Loyalty Options</button>
+                    <button onClick={() => setIsCalling(true)} className="whitespace-nowrap bg-blue-600/10 border border-blue-500/20 text-blue-500 text-[10px] font-bold uppercase tracking-widest px-4 py-2 rounded-full active:bg-blue-600/20 flex-shrink-0 flex items-center gap-2">
+                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M6.62,10.79C8.06,13.62 10.38,15.94 13.21,17.38L15.41,15.18C15.69,14.9 16.08,14.82 16.43,14.93C17.55,15.3 18.75,15.5 20,15.5A1,1 0 0,1 21,16.5V20A1,1 0 0,1 20,21A17,17 0 0,1 3,4A1,1 0 0,1 4,3H7.5A1,1 0 0,1 8.5,4C8.5,5.25 8.7,6.45 9.07,7.57C9.18,7.92 9.1,8.31 8.82,8.59L6.62,10.79Z" /></svg>
+                        Call AI Voice Support
+                    </button>
+                </div>
+                <div className="flex gap-3">
+                    <input 
+                        className="flex-1 bg-zinc-900 border border-zinc-800 rounded-2xl px-5 py-3.5 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm placeholder-zinc-600" 
+                        placeholder="Message support..." 
+                        value={input} 
+                        onChange={(e) => setInput(e.target.value)} 
+                        onKeyDown={(e) => e.key === 'Enter' && handleSend()} 
+                    />
+                    <button 
+                        onClick={() => handleSend()} 
+                        className="w-12 h-12 bg-white text-black rounded-2xl flex items-center justify-center active:scale-95 transition-all shadow-lg"
+                    >
+                        <ICONS.ChevronRight className="w-6 h-6" />
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const LeaseManagement: React.FC<{ 
     state: LeaseState, 
     setState: React.Dispatch<React.SetStateAction<LeaseState>>,
@@ -81,11 +205,11 @@ const LeaseManagement: React.FC<{
     const [isReturning, setIsReturning] = useState(false);
     const [showSurvey, setShowSurvey] = useState(false);
     const [surveyScore, setSurveyScore] = useState<number | null>(null);
+    const [surveyFeedback, setSurveyFeedback] = useState('');
     const [surveySubmitted, setSurveySubmitted] = useState(false);
     const [paymentConfirmed, setPaymentConfirmed] = useState(false);
+    const [isChatOpen, setIsChatOpen] = useState(false);
 
-    const isT60 = state.daysLeft <= 60 && state.daysLeft > 0;
-    const isPre60 = state.daysLeft > 60;
     const isReturnDay = state.daysLeft === 0;
     const isPostReturn = state.isReturned || state.daysLeft < 0;
 
@@ -94,7 +218,10 @@ const LeaseManagement: React.FC<{
         setShowSurvey(false);
         setSurveySubmitted(false);
         setSurveyScore(null);
-    }, [state.daysLeft]);
+        setSurveyFeedback('');
+        setWalkthroughStep(0);
+        setLocalSelectedDate(state.scheduledDate);
+    }, [state.daysLeft, subTab]);
 
     const handleLeaseReturn = () => {
         setShowSuccessScreen(true);
@@ -114,35 +241,30 @@ const LeaseManagement: React.FC<{
     };
 
     const handlePayment = () => {
-      if (confirm("Authorize payment of $450.00 to Tesla Finance?")) {
-          setIsPaying(true);
-          setTimeout(() => {
-              setIsPaying(false);
-              setPaymentConfirmed(true);
-              
-              setTimeout(() => {
-                  setPaymentConfirmed(false);
-                  setIsPaid(true);
-                  setSubTab('Overview');
-                  
-                  // Trigger survey shortly after returning to overview
-                  setTimeout(() => {
-                      setShowSurvey(true);
-                  }, 600);
-              }, 2000);
-          }, 2000);
-      }
+        setIsPaying(true);
+        setTimeout(() => {
+            setIsPaying(false);
+            setPaymentConfirmed(true);
+            setTimeout(() => {
+                setPaymentConfirmed(false);
+                setIsPaid(true);
+                setSubTab('Overview');
+                setTimeout(() => {
+                    setShowSurvey(true);
+                }, 800);
+            }, 2500);
+        }, 1500);
     };
 
     const renderPaymentConfirmation = () => (
-      <div className="absolute inset-0 z-[600] bg-black flex flex-col items-center justify-center p-8 text-center animate-in fade-in duration-500">
-          <div className="w-20 h-20 bg-green-500/10 rounded-full flex items-center justify-center mb-6">
-              <ICONS.Check className="w-10 h-10 text-green-500" />
+      <div className="absolute inset-0 z-[700] bg-black flex flex-col items-center justify-center p-8 text-center animate-in fade-in duration-500">
+          <div className="w-24 h-24 bg-green-500/10 rounded-full flex items-center justify-center mb-8 border border-green-500/20">
+              <ICONS.Check className="w-12 h-12 text-green-500" />
           </div>
-          <h3 className="text-2xl font-bold tracking-tight mb-2">Payment Confirmed</h3>
-          <p className="text-zinc-500 text-sm">Your final statement has been settled.</p>
-          <div className="mt-8 w-12 h-1 bg-zinc-900 rounded-full overflow-hidden">
-              <div className="h-full bg-white animate-[progress_2s_linear]" />
+          <h3 className="text-2xl font-bold tracking-tight mb-2">Payment Successful</h3>
+          <p className="text-zinc-500 text-sm">Your final lease statement has been settled. Thank you for choosing Tesla.</p>
+          <div className="mt-12 w-16 h-1 bg-zinc-900 rounded-full overflow-hidden">
+              <div className="h-full bg-white animate-[progress_2.5s_linear]" />
           </div>
           <style>{`
               @keyframes progress { from { width: 0%; } to { width: 100%; } }
@@ -160,55 +282,53 @@ const LeaseManagement: React.FC<{
             <p className="text-zinc-400 text-sm leading-relaxed max-w-[280px]">
                 Thank you for being a Tesla customer. Your vehicle is now being processed.
             </p>
-            <div className="mt-12 w-full max-w-[200px] h-1 bg-zinc-900 rounded-full overflow-hidden">
-                <div className="h-full bg-white animate-[progress_4s_linear]" />
-            </div>
         </div>
     );
 
     const renderSurveyModal = () => (
-      <div className="fixed inset-0 z-[999] bg-black/95 backdrop-blur-2xl flex flex-col items-center justify-center p-8 animate-in fade-in duration-500">
-        <div className="bg-zinc-900 w-full max-w-[340px] rounded-[40px] p-10 border border-zinc-800 shadow-[0_0_80px_rgba(0,0,0,0.8)] relative overflow-hidden">
+      <div className="absolute inset-0 z-[800] bg-black/90 backdrop-blur-3xl flex flex-col items-center justify-center p-8 animate-in slide-in-from-bottom duration-500">
+        <div className="bg-zinc-900 w-full max-w-[360px] rounded-[40px] p-8 border border-zinc-800 shadow-[0_40px_100px_rgba(0,0,0,1)] relative overflow-hidden">
            <div className="absolute -top-12 -right-12 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl"></div>
-           
            {!surveySubmitted ? (
-             <div className="space-y-8 relative z-10">
+             <div className="space-y-6 relative z-10">
                <div className="text-center">
-                 <div className="w-16 h-16 bg-blue-500/5 rounded-full flex items-center justify-center mx-auto mb-6 border border-zinc-800">
+                 <div className="w-16 h-16 bg-zinc-800 rounded-3xl flex items-center justify-center mx-auto mb-4 border border-zinc-700 shadow-xl">
                    <ICONS.Bot className="w-8 h-8 text-blue-500" />
                  </div>
-                 <h4 className="text-xl font-bold tracking-tight">Rate Your Experience</h4>
-                 <p className="text-sm text-zinc-500 mt-2 leading-relaxed">How would you rate the lease return process today?</p>
+                 <h4 className="text-xl font-bold tracking-tight">Return Experience</h4>
+                 <p className="text-sm text-zinc-500 mt-2 leading-relaxed">How would you rate the overall return process today?</p>
                </div>
-
                <div className="flex justify-between items-center gap-2">
                  {[1, 2, 3, 4, 5].map((score) => (
                    <button
                      key={score}
                      onClick={() => setSurveyScore(score)}
-                     className={`w-12 h-12 rounded-full text-sm font-bold transition-all border ${
-                       surveyScore === score 
-                        ? 'bg-white text-black border-white shadow-lg shadow-white/20 scale-110' 
-                        : 'bg-zinc-800 text-zinc-500 border-zinc-700 hover:border-zinc-500 active:scale-95'
+                     className={`w-11 h-11 rounded-full text-sm font-bold transition-all border ${
+                       surveyScore === score ? 'bg-white text-black border-white shadow-lg scale-110' : 'bg-zinc-800 text-zinc-500 border-zinc-700 active:scale-95'
                      }`}
                    >
                      {score}
                    </button>
                  ))}
                </div>
-               
-               <div className="flex justify-between px-2 text-[9px] font-black text-zinc-700 uppercase tracking-widest">
-                 <span>Needs Work</span>
+               <div className="flex justify-between px-1 text-[9px] font-black text-zinc-700 uppercase tracking-widest">
+                 <span>Not Helpful</span>
                  <span>Excellent</span>
                </div>
+               
+               <div className="space-y-2">
+                 <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest px-1">Detailed Feedback (Optional)</p>
+                 <textarea 
+                    className="w-full h-24 bg-zinc-800/50 rounded-2xl p-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 border border-zinc-700 placeholder-zinc-600 transition-all"
+                    placeholder="Tell us more about your experience..."
+                    value={surveyFeedback}
+                    onChange={(e) => setSurveyFeedback(e.target.value)}
+                 />
+               </div>
 
-               <div className="flex flex-col gap-3 pt-6">
-                 <Button variant="primary" disabled={surveyScore === null} onClick={() => setSurveySubmitted(true)}>
-                   Submit Feedback
-                 </Button>
-                 <button onClick={() => setShowSurvey(false)} className="text-[10px] uppercase font-black text-zinc-600 tracking-[0.2em] py-4 hover:text-white transition-colors">
-                   Close
-                 </button>
+               <div className="flex flex-col gap-2 pt-2">
+                 <Button variant="primary" disabled={surveyScore === null} onClick={() => setSurveySubmitted(true)}>Submit Feedback</Button>
+                 <button onClick={() => setShowSurvey(false)} className="text-[10px] uppercase font-black text-zinc-600 tracking-[0.2em] py-3 hover:text-white transition-colors">No Thanks</button>
                </div>
              </div>
            ) : (
@@ -216,11 +336,9 @@ const LeaseManagement: React.FC<{
                 <div className="w-20 h-20 bg-green-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-green-500/20">
                   <ICONS.Check className="w-10 h-10 text-green-500" />
                 </div>
-                <h4 className="text-2xl font-bold">Feedback Sent</h4>
-                <p className="text-sm text-zinc-500">Your loyalty is appreciated. Thank you for choosing Tesla.</p>
-                <Button variant="secondary" onClick={() => setShowSurvey(false)} className="mt-8">
-                  Dismiss
-                </Button>
+                <h4 className="text-2xl font-bold tracking-tight">Thank You</h4>
+                <p className="text-sm text-zinc-500 leading-relaxed px-4">Your feedback helps us refine the ownership experience.</p>
+                <Button variant="secondary" onClick={() => setShowSurvey(false)} className="mt-8">Close</Button>
              </div>
            )}
         </div>
@@ -239,49 +357,24 @@ const LeaseManagement: React.FC<{
                         <h3 className="text-2xl font-bold tracking-tight">{isPaid ? 'Account Closed' : 'Vehicle Received'}</h3>
                         <p className="text-zinc-500 text-sm mt-2">{isPaid ? 'Thank you for your loyalty' : 'Lease Termination in Progress'}</p>
                     </div>
-
                     <div className="bg-zinc-900/50 rounded-3xl p-6 border border-zinc-800/50 space-y-4">
-                        <div className="flex justify-between items-center text-xs">
-                            <span className="text-zinc-500 font-bold uppercase tracking-widest">Returned Location</span>
-                            <span className="font-semibold">Tesla Palo Alto</span>
-                        </div>
-                        <div className="flex justify-between items-center text-xs">
-                            <span className="text-zinc-500 font-bold uppercase tracking-widest">Return Time</span>
-                            <span className="font-semibold">{state.scheduledDate || 'June 15, 2024'}, 2:45 PM</span>
-                        </div>
-                        <div className="flex justify-between items-center text-xs">
-                            <span className="text-zinc-500 font-bold uppercase tracking-widest">Status</span>
-                            <span className={`${isPaid ? 'text-blue-500' : 'text-green-500'} font-bold uppercase`}>{isPaid ? 'Paid' : 'Success'}</span>
-                        </div>
+                        <div className="flex justify-between items-center text-xs"><span className="text-zinc-500 font-bold uppercase tracking-widest">Returned Location</span><span className="font-semibold">Tesla Palo Alto</span></div>
+                        <div className="flex justify-between items-center text-xs"><span className="text-zinc-500 font-bold uppercase tracking-widest">Return Time</span><span className="font-semibold">{state.scheduledDate || 'June 15, 2024'}, 2:45 PM</span></div>
+                        <div className="flex justify-between items-center text-xs"><span className="text-zinc-500 font-bold uppercase tracking-widest">Status</span><span className={`${isPaid ? 'text-blue-500' : 'text-green-500'} font-bold uppercase`}>{isPaid ? 'Paid' : 'Success'}</span></div>
                     </div>
-
                     <div className="px-2">
                         <p className="text-[10px] text-zinc-500 font-black uppercase tracking-[0.2em] mb-6">Final Inspection & Billing</p>
                         <div className="flex flex-col">
                             <TimelineItem title="Vehicle Received" status={`Completed ${state.scheduledDate || 'June 15'}`} isComplete />
                             <TimelineItem title="Final Inspection" status={isBillReady ? "Completed June 18" : "Pending Technician Review"} isComplete={isBillReady} />
-                            <TimelineItem 
-                              title="Final Bill Generated" 
-                              status={isBillReady ? "Ready - June 20" : "Available in 3-5 Business Days"} 
-                              isComplete={isBillReady} 
-                              onClick={!isBillReady ? () => setIsBillReady(true) : undefined}
-                            />
-                            <TimelineItem 
-                              title="Payment Due Date" 
-                              status={isPaid ? "Paid - Receipt Sent" : (isBillReady ? "Due July 15, 2024" : "TBD")} 
-                              isComplete={isPaid}
-                              isLast 
-                            />
+                            <TimelineItem title="Final Bill Generated" status={isBillReady ? "Ready - June 20" : "Available in 3-5 Business Days"} isComplete={isBillReady} onClick={!isBillReady ? () => setIsBillReady(true) : undefined} />
+                            <TimelineItem title="Payment Due Date" status={isPaid ? "Paid - Receipt Sent" : (isBillReady ? "Due July 15, 2024" : "TBD")} isComplete={isPaid} isLast />
                         </div>
                     </div>
-
                     {isBillReady && !isPaid && (
                       <div className="animate-in slide-in-from-bottom duration-500 bg-zinc-900 rounded-3xl p-6 border border-blue-500/20">
                         <div className="flex justify-between items-end mb-6">
-                          <div>
-                            <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mb-1">Due July 15</p>
-                            <p className="text-3xl font-black">$450.00</p>
-                          </div>
+                          <div><p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mb-1">Due July 15</p><p className="text-3xl font-black">$450.00</p></div>
                           <ICONS.Dollar className="w-8 h-8 text-blue-500 opacity-50" />
                         </div>
                         <Button variant="primary" onClick={() => setSubTab('BillBreakdown')}>View Breakdown & Pay</Button>
@@ -295,118 +388,70 @@ const LeaseManagement: React.FC<{
             const allChecksPassed = state.isInspectionComplete && state.hasKeys && state.hasPersonalItemsRemoved;
             return (
                 <div className="space-y-8 animate-in fade-in slide-in-from-right duration-500 py-4">
-                    <button onClick={() => setIsReturning(false)} className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 flex items-center gap-1">
-                        <ICONS.ChevronRight className="w-3 h-3 rotate-180" /> Back to Overview
-                    </button>
-                    <div className="text-center">
-                        <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-[0.4em] mb-2">Maturity Reached</p>
-                        <h3 className="text-3xl font-bold tracking-tight">Return Day</h3>
-                        <p className="text-xs text-zinc-500 mt-2">Palo Alto Service Center</p>
-                    </div>
-
+                    <button onClick={() => setIsReturning(false)} className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 flex items-center gap-1"><ICONS.ChevronRight className="w-3 h-3 rotate-180" /> Back to Overview</button>
+                    <div className="text-center"><p className="text-[10px] text-zinc-500 font-bold uppercase tracking-[0.4em] mb-2">Maturity Reached</p><h3 className="text-3xl font-bold tracking-tight">Return Day</h3><p className="text-xs text-zinc-500 mt-2">Palo Alto Service Center</p></div>
                     <div className="bg-zinc-900/40 p-6 rounded-3xl border border-zinc-800/50">
                          <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-500 mb-6">Final Checklist</h4>
                          <div className="space-y-5">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center space-x-3">
-                                    <div className={`w-5 h-5 rounded-full flex items-center justify-center transition-colors ${state.isInspectionComplete ? 'bg-blue-500' : 'bg-zinc-800'}`}>
-                                        {state.isInspectionComplete && <ICONS.Check className="w-3 h-3 text-white" />}
-                                    </div>
-                                    <span className="text-sm font-medium">Pre-Inspection Done</span>
-                                </div>
-                                {!state.isInspectionComplete && (
-                                    /* Fixed: Use a block statement instead of a logical OR to avoid truthiness test on void expression */
-                                    <button className="text-[10px] text-blue-500 font-bold uppercase tracking-widest" onClick={() => { setWalkthroughStep(0); setSubTab('Inspection'); }}>Start</button>
-                                )}
-                            </div>
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center space-x-3">
-                                    <div className={`w-5 h-5 rounded-full flex items-center justify-center transition-colors ${state.hasKeys ? 'bg-blue-500' : 'bg-zinc-800'}`}>
-                                        {state.hasKeys && <ICONS.Check className="w-3 h-3 text-white" />}
-                                    </div>
-                                    <span className="text-sm font-medium">Keys in Center Console</span>
-                                </div>
-                                <input type="checkbox" checked={state.hasKeys} onChange={(e) => setState(s => ({ ...s, hasKeys: e.target.checked }))} className="w-5 h-5 bg-zinc-800 rounded accent-blue-500 border-none cursor-pointer" />
-                            </div>
-                             <div className="flex items-center justify-between">
-                                <div className="flex items-center space-x-3">
-                                    <div className={`w-5 h-5 rounded-full flex items-center justify-center transition-colors ${state.hasPersonalItemsRemoved ? 'bg-blue-500' : 'bg-zinc-800'}`}>
-                                        {state.hasPersonalItemsRemoved && <ICONS.Check className="w-3 h-3 text-white" />}
-                                    </div>
-                                    <span className="text-sm font-medium">Personal Items Removed</span>
-                                </div>
-                                <input type="checkbox" checked={state.hasPersonalItemsRemoved} onChange={(e) => setState(s => ({ ...s, hasPersonalItemsRemoved: e.target.checked }))} className="w-5 h-5 bg-zinc-800 rounded accent-blue-500 border-none cursor-pointer" />
-                            </div>
+                            <div className="flex items-center justify-between"><div className="flex items-center space-x-3"><div className={`w-5 h-5 rounded-full flex items-center justify-center transition-colors ${state.isInspectionComplete ? 'bg-blue-500' : 'bg-zinc-800'}`}>{state.isInspectionComplete && <ICONS.Check className="w-3 h-3 text-white" />}</div><span className="text-sm font-medium">Pre-Inspection Done</span></div>{!state.isInspectionComplete && (<button className="text-[10px] text-blue-500 font-bold uppercase tracking-widest" onClick={() => { setSubTab('Inspection'); }}>Start</button>)}</div>
+                            <div className="flex items-center justify-between"><div className="flex items-center space-x-3"><div className={`w-5 h-5 rounded-full flex items-center justify-center transition-colors ${state.hasKeys ? 'bg-blue-500' : 'bg-zinc-800'}`}>{state.hasKeys && <ICONS.Check className="w-3 h-3 text-white" />}</div><span className="text-sm font-medium">Keys in Center Console</span></div><input type="checkbox" checked={state.hasKeys} onChange={(e) => setState(s => ({ ...s, hasKeys: e.target.checked }))} className="w-5 h-5 bg-zinc-800 rounded accent-blue-500 border-none cursor-pointer" /></div>
+                             <div className="flex items-center justify-between"><div className="flex items-center space-x-3"><div className={`w-5 h-5 rounded-full flex items-center justify-center transition-colors ${state.hasPersonalItemsRemoved ? 'bg-blue-500' : 'bg-zinc-800'}`}>{state.hasPersonalItemsRemoved && <ICONS.Check className="w-3 h-3 text-white" />}</div><span className="text-sm font-medium">Personal Items Removed</span></div><input type="checkbox" checked={state.hasPersonalItemsRemoved} onChange={(e) => setState(s => ({ ...s, hasPersonalItemsRemoved: e.target.checked }))} className="w-5 h-5 bg-zinc-800 rounded accent-blue-500 border-none cursor-pointer" /></div>
                          </div>
                     </div>
-
                     <div className="flex flex-col items-center justify-center pt-4 space-y-6">
-                        <div className="relative">
-                            {allChecksPassed && <div className="absolute inset-0 bg-tesla-red/30 rounded-full blur-3xl animate-pulse scale-150"></div>}
-                            <button disabled={!allChecksPassed} onClick={handleLeaseReturn} className={`relative w-40 h-40 rounded-full flex flex-col items-center justify-center transition-all duration-500 shadow-2xl ${allChecksPassed ? 'bg-tesla-red text-white scale-100 active:scale-95' : 'bg-zinc-900 text-zinc-700 border border-zinc-800 scale-90 opacity-60 cursor-not-allowed'}`}>
-                                <span className="text-[10px] font-bold uppercase tracking-widest leading-tight">Lease</span>
-                                <span className="text-2xl font-black uppercase tracking-tighter">Return</span>
-                            </button>
-                        </div>
+                        <div className="relative">{allChecksPassed && <div className="absolute inset-0 bg-tesla-red/30 rounded-full blur-3xl animate-pulse scale-150"></div>}<button disabled={!allChecksPassed} onClick={handleLeaseReturn} className={`relative w-40 h-40 rounded-full flex flex-col items-center justify-center transition-all duration-500 shadow-2xl ${allChecksPassed ? 'bg-tesla-red text-white scale-100 active:scale-95' : 'bg-zinc-900 text-zinc-700 border border-zinc-800 scale-90 opacity-60 cursor-not-allowed'}`}><span className="text-[10px] font-bold uppercase tracking-widest leading-tight">Lease</span><span className="text-2xl font-black uppercase tracking-tighter">Return</span></button></div>
                         {!allChecksPassed && <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest animate-in fade-in duration-1000">Complete checklist to return</p>}
                     </div>
                 </div>
             );
         }
 
+        const mileageUsedPercent = Math.min(100, (state.currentMileage / state.allowedMileage) * 100);
+        const mileageRemaining = Math.max(0, state.allowedMileage - state.currentMileage);
+
         return (
             <div className="space-y-6 animate-in fade-in duration-500">
                 <div className="bg-zinc-900 rounded-3xl p-6 border border-zinc-800">
                     <div className="flex justify-between items-start mb-4">
-                        <div>
-                            <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Lease Status</p>
-                            <h3 className="text-xl font-semibold mt-1">36-Month Lease</h3>
-                        </div>
-                        <div className="text-right">
-                            <p className={`text-sm font-bold ${state.daysLeft <= 10 ? 'tesla-red' : 'text-blue-400'}`}>
-                                {isReturnDay ? 'DUE TODAY' : `${state.daysLeft} DAYS LEFT`}
-                            </p>
-                        </div>
+                        <div><p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Lease Status</p><h3 className="text-xl font-semibold mt-1">36-Month Lease</h3></div>
+                        <div className="text-right"><p className={`text-sm font-bold ${state.daysLeft <= 10 && state.daysLeft >= 0 ? 'tesla-red' : 'text-blue-400'}`}>{isReturnDay ? 'DUE TODAY' : `${state.daysLeft} DAYS LEFT`}</p></div>
                     </div>
-
-                    <div className="space-y-4 pt-4 border-t border-zinc-800/50">
+                    
+                    <div className="space-y-6 pt-4 border-t border-zinc-800/50">
                         <div className="flex justify-between text-xs">
-                            <span className="text-zinc-500">Maturity Date</span>
-                            <span>{state.maturityDate}</span>
+                            <span className="text-zinc-500 font-bold uppercase tracking-widest">Maturity Date</span>
+                            <span className="font-semibold">{state.maturityDate}</span>
                         </div>
-                        <div className="space-y-2">
-                            <div className="flex justify-between text-xs">
-                                <span className="text-zinc-500">Mileage Tracking</span>
-                                <span>{state.currentMileage.toLocaleString()} / {state.allowedMileage.toLocaleString()} mi</span>
+
+                        {/* Mileage Tracking Section */}
+                        <div className="space-y-3">
+                            <div className="flex justify-between items-end">
+                                <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Mileage Tracking</span>
+                                <span className="text-xs font-semibold">{state.currentMileage.toLocaleString()} / {state.allowedMileage.toLocaleString()} mi</span>
                             </div>
-                            <div className={`h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden`}>
-                                <div className={`h-full rounded-full transition-all duration-1000 ${state.currentMileage / state.allowedMileage > 0.9 ? 'bg-tesla-red' : 'bg-blue-500'}`} style={{ width: `${Math.min(100, (state.currentMileage / state.allowedMileage) * 100)}%` }} />
+                            <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
+                                <div 
+                                    className={`h-full rounded-full transition-all duration-1000 ease-out ${mileageUsedPercent > 95 ? 'bg-tesla-red' : 'bg-blue-500'}`} 
+                                    style={{ width: `${mileageUsedPercent}%` }} 
+                                />
                             </div>
-                            <p className="text-[10px] text-zinc-600 text-right">Remaining: {Math.max(0, state.allowedMileage - state.currentMileage).toLocaleString()} mi</p>
+                            <div className="flex justify-between">
+                                <span className="text-[9px] text-zinc-600 font-bold uppercase tracking-widest">Used: {mileageUsedPercent.toFixed(1)}%</span>
+                                <span className={`text-[9px] font-bold uppercase tracking-widest ${mileageRemaining < 500 ? 'text-tesla-red' : 'text-zinc-500'}`}>
+                                    Remaining: {mileageRemaining.toLocaleString()} mi
+                                </span>
+                            </div>
                         </div>
                     </div>
                 </div>
 
                 <div className="space-y-3">
                     <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-widest px-1">Next Steps</h4>
-                    {isReturnDay && !isReturning && (
-                        <Button variant="primary" onClick={() => setIsReturning(true)} className="mb-4 shadow-[0_4px_20px_rgba(255,255,255,0.1)]">
-                            Starting Return
-                        </Button>
-                    )}
-                    
-                    {isPre60 ? (
-                        <div className="bg-zinc-900/40 p-5 rounded-2xl border border-dashed border-zinc-800 text-center">
-                            <p className="text-sm text-zinc-400">Scheduling and retention offers unlock at 60 days prior to maturity.</p>
-                        </div>
-                    ) : (
-                        <>
-                            <MenuCard icon={<ICONS.Camera className="w-5 h-5" />} title="Pre-Inspection" subtitle={state.isInspectionComplete ? "Completed ✅" : "Prepare for return walkthrough"} onClick={() => setSubTab('Inspection')} />
-                            <MenuCard icon={<ICONS.Dollar className="w-5 h-5" />} title="Retention Offers" subtitle={state.selectedOption ? `Selected: ${state.selectedOption}` : "View loyalty incentives"} onClick={() => setSubTab('Offers')} />
-                            <MenuCard icon={<ICONS.Calendar className="w-5 h-5" />} title="Schedule Return" subtitle={state.isScheduled ? "Confirmed" : "Select location and time"} onClick={() => setSubTab('Schedule')} />
-                            <MenuCard icon={<ICONS.Bot className="w-5 h-5" />} title="Documents & Billing" subtitle="View lease agreement and final statements" onClick={() => setSubTab('Billing')} />
-                        </>
-                    )}
+                    {isReturnDay && !isReturning && (<Button variant="primary" onClick={() => setIsReturning(true)} className="mb-4 shadow-[0_4px_20px_rgba(255,255,255,0.1)]">Starting Return</Button>)}
+                    <MenuCard icon={<ICONS.Camera className="w-5 h-5" />} title="Pre-Inspection" subtitle={state.isInspectionComplete ? "Completed ✅" : "Prepare for return walkthrough"} onClick={() => setSubTab('Inspection')} />
+                    <MenuCard icon={<ICONS.Dollar className="w-5 h-5" />} title="Retention Offers" subtitle={state.selectedOption ? `Selected: ${state.selectedOption}` : "View loyalty incentives"} onClick={() => setSubTab('Offers')} />
+                    <MenuCard icon={<ICONS.Calendar className="w-5 h-5" />} title="Schedule Return" subtitle={state.isScheduled ? "Confirmed" : "Select location and time"} onClick={() => setSubTab('Schedule')} />
+                    <MenuCard icon={<ICONS.Bot className="w-5 h-5" />} title="Documents & Billing" subtitle="View lease agreement and final statements" onClick={() => setSubTab('Billing')} />
                 </div>
             </div>
         );
@@ -414,7 +459,7 @@ const LeaseManagement: React.FC<{
 
     const renderBillBreakdown = () => (
       <div className="space-y-6 animate-in slide-in-from-right duration-500">
-        <h3 className="text-xl font-bold">Bill Breakdown</h3>
+        <header className="flex items-center justify-between mb-4"><h3 className="text-xl font-bold">Final Statement</h3><span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Ref #TSLA-9281</span></header>
         <div className="bg-zinc-900/50 rounded-3xl p-6 border border-zinc-800 divide-y divide-zinc-800/50">
           <div className="py-4 flex justify-between text-sm"><span className="text-zinc-500">Disposition Fee</span><span>$350.00</span></div>
           <div className="py-4 flex justify-between text-sm"><span className="text-zinc-500">Exterior (Inspection ID #829)</span><span>$150.00</span></div>
@@ -424,102 +469,113 @@ const LeaseManagement: React.FC<{
           <div className="pt-6 flex justify-between items-end"><span className="text-lg font-bold">Total Due</span><span className="text-2xl font-black">$450.00</span></div>
         </div>
         <div className="space-y-3">
-          <Button variant="primary" onClick={handlePayment} disabled={isPaying}>
-            {isPaying ? (
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin"></div>
-                Processing...
-              </div>
-            ) : "Pay Now"}
-          </Button>
-          <Button variant="ghost" onClick={() => setSubTab('Overview')}>Back to Summary</Button>
+          <Button variant="primary" onClick={handlePayment} disabled={isPaying}>{isPaying ? (<div className="flex items-center gap-2"><div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin"></div>Authorizing...</div>) : "Pay Now"}</Button>
+          <Button variant="ghost" onClick={() => setSubTab('Overview')}>Cancel</Button>
         </div>
       </div>
     );
 
     const renderInspection = () => (
-        <div className="space-y-6 h-full flex flex-col">
+        <div className="space-y-6 h-full flex flex-col animate-in fade-in duration-500">
             <h3 className="text-xl font-bold">Pre-Inspection Walkthrough</h3>
             {walkthroughStep === 0 && (
                 <div className="flex-1 flex flex-col justify-center items-center text-center px-4">
-                    <div className="w-32 h-32 bg-zinc-900 rounded-full flex items-center justify-center mb-6"><ICONS.Camera className="w-12 h-12 text-blue-500" /></div>
-                    <p className="text-sm text-zinc-400 mb-8 leading-relaxed">We'll guide you through a 3D scan of your vehicle to estimate wear and tear before your return.</p>
+                    <div className="w-32 h-32 bg-zinc-900 rounded-full flex items-center justify-center mb-6 border border-zinc-800"><ICONS.Camera className="w-12 h-12 text-blue-500" /></div>
+                    <p className="text-sm text-zinc-400 mb-8 leading-relaxed">We'll guide you through a virtual scan of your vehicle to estimate potential wear and tear before return.</p>
                     <Button onClick={() => setWalkthroughStep(1)}>Start Walkthrough</Button>
                 </div>
             )}
             {walkthroughStep === 1 && (
                 <div className="flex-1 relative bg-zinc-950 rounded-3xl overflow-hidden border border-zinc-800">
-                    <img src="https://images.unsplash.com/photo-1536700503339-1e4b06520771?auto=format&fit=crop&q=80&w=800" className="w-full h-full object-cover opacity-50" />
-                    <div className="absolute inset-0 flex flex-col items-center justify-center">
-                        <div className="w-64 h-64 border-2 border-white/20 rounded-full flex items-center justify-center animate-pulse"><div className="w-48 h-48 border-2 border-blue-500/50 rounded-full" /></div>
-                        <div className="mt-8 px-6 py-2 bg-blue-600/20 backdrop-blur rounded-full border border-blue-500/30 text-[10px] font-bold tracking-widest uppercase">Scanning Front Fascia... 48%</div>
+                    <img src="https://images.unsplash.com/photo-1536700503339-1e4b06520771?auto=format&fit=crop&q=80&w=800" className="w-full h-full object-cover opacity-40 grayscale" />
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40">
+                        <div className="w-64 h-64 border-2 border-white/10 rounded-full flex items-center justify-center animate-pulse"><div className="w-48 h-48 border-2 border-blue-500/30 rounded-full" /></div>
+                        <div className="mt-8 px-6 py-2 bg-blue-600/20 backdrop-blur rounded-full border border-blue-500/30 text-[10px] font-bold tracking-widest uppercase animate-pulse">Scanning Front Fascia... 62%</div>
                     </div>
-                    <Button className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[80%]" onClick={() => { setWalkthroughStep(2); setState(s => ({ ...s, isInspectionComplete: true })); }}>Manual Override: Complete</Button>
+                    <Button className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[80%]" onClick={() => { setWalkthroughStep(2); setState(s => ({ ...s, isInspectionComplete: true })); }}>Simulate Scan Complete</Button>
                 </div>
             )}
             {walkthroughStep === 2 && (
-                <div className="flex-1 animate-in slide-in-from-bottom duration-700">
-                    <div className="bg-zinc-900/50 p-6 rounded-3xl border border-zinc-800 mb-6">
-                        <div className="flex justify-between items-center mb-6"><span className="text-sm font-bold uppercase tracking-widest">Estimated Charges</span><span className="text-xl font-bold text-blue-400">$350 - $650</span></div>
+                <div className="flex-1 space-y-6 animate-in slide-in-from-bottom duration-700">
+                    <div className="bg-zinc-900/50 p-6 rounded-3xl border border-zinc-800">
+                        <div className="flex justify-between items-center mb-6"><span className="text-xs font-bold uppercase tracking-widest text-zinc-500">Initial Estimate</span><span className="text-xl font-bold text-blue-400">$350 - $650</span></div>
                         <div className="space-y-4">
-                            <div className="flex justify-between items-center text-sm"><span className="text-zinc-400">Exterior (Scratches)</span><span>$150.00</span></div>
+                            <div className="flex justify-between items-center text-sm"><span className="text-zinc-400">Exterior (Minor Scratches)</span><span>$150.00</span></div>
                             <div className="flex justify-between items-center text-sm"><span className="text-zinc-400">Tires (Excess Wear)</span><span>$200.00</span></div>
-                            <div className="flex justify-between items-center text-sm"><span className="text-zinc-400">Mileage Overage</span><span>$0.00</span></div>
                         </div>
                     </div>
-                    <Button onClick={() => { setState(s => ({ ...s, isEstimateConfirmed: true })); setSubTab('Overview'); }}>Confirm Estimate</Button>
+                    <p className="text-xs text-zinc-500 leading-relaxed px-2">Final charges will be determined by a Tesla technician after the physical return of the vehicle.</p>
+                    <Button onClick={() => { setState(s => ({ ...s, isEstimateConfirmed: true })); setSubTab('Overview'); }}>Accept Estimate</Button>
                 </div>
             )}
         </div>
     );
 
-    const renderOffers = () => (
-        <div className="space-y-6">
-            <h3 className="text-xl font-bold">Retention Offers</h3>
-            <div className="space-y-4">
-                {[
-                    { id: 'New Lease', title: 'Start a New Lease', sub: 'Model Y from $399/mo', tag: 'Loyalty Credit: $500' },
-                    { id: 'Buy', title: 'Purchase Vehicle', sub: 'Buyout Price: $28,450', tag: '0.99% APR Available' },
-                    { id: 'Return', title: 'Return Vehicle', sub: 'No loyalty credit applied', tag: null }
-                ].map(opt => (
-                    <button key={opt.id} onClick={() => setState(s => ({ ...s, selectedOption: opt.id as any }))} className={`w-full p-6 rounded-3xl border text-left transition-all ${state.selectedOption === opt.id ? 'bg-white text-black border-white' : 'bg-zinc-900 border-zinc-800'}`}>
-                        <div className="flex justify-between items-start">
-                            <div><h4 className="font-bold">{opt.title}</h4><p className={`text-xs mt-1 ${state.selectedOption === opt.id ? 'text-zinc-600' : 'text-zinc-400'}`}>{opt.sub}</p></div>
-                            {opt.tag && <span className={`text-[8px] font-bold uppercase px-2 py-1 rounded ${state.selectedOption === opt.id ? 'bg-black text-white' : 'bg-blue-600 text-white'}`}>{opt.tag}</span>}
-                        </div>
-                    </button>
-                ))}
+    const renderOffers = () => {
+        const offers = [
+            { id: 'New Lease', title: 'Start a New Lease', sub: 'Model Y from $399/mo', tag: 'Loyalty Credit: $500' },
+            { id: 'Buy', title: 'Purchase Vehicle', sub: 'Estimated Buyout: $28,450', tag: '0.99% APR Avail' },
+            { id: 'Return', title: 'Return Vehicle', sub: 'Terminate at Maturity', tag: null }
+        ];
+        return (
+            <div className="space-y-6 animate-in fade-in duration-500">
+                <h3 className="text-xl font-bold">Retention Offers</h3>
+                <div className="space-y-3">
+                    {offers.map(opt => (
+                        <button 
+                            key={opt.id} 
+                            onClick={() => setState(s => ({ ...s, selectedOption: opt.id as any }))} 
+                            className={`w-full p-6 rounded-3xl border text-left transition-all ${state.selectedOption === opt.id ? 'bg-white text-black border-white shadow-lg' : 'bg-zinc-900 border-zinc-800'}`}
+                        >
+                            <div className="flex justify-between items-start">
+                                <div>
+                                    <h4 className="font-bold">{opt.title}</h4>
+                                    <p className={`text-xs mt-1 ${state.selectedOption === opt.id ? 'text-zinc-600' : 'text-zinc-400'}`}>{opt.sub}</p>
+                                </div>
+                                {opt.tag && <span className={`text-[8px] font-bold uppercase px-2 py-1 rounded ${state.selectedOption === opt.id ? 'bg-black text-white' : 'bg-blue-600 text-white'}`}>{opt.tag}</span>}
+                            </div>
+                        </button>
+                    ))}
+                </div>
+                <div className="pt-4">
+                    <Button disabled={!state.selectedOption} onClick={() => setSubTab('Overview')}>Accept Selection</Button>
+                </div>
             </div>
-            <Button disabled={!state.selectedOption} onClick={() => setSubTab('Overview')}>Accept Selection</Button>
-        </div>
-    );
+        );
+    };
 
     const renderSchedule = () => (
-        <div className="space-y-6 h-full flex flex-col">
+        <div className="space-y-6 h-full flex flex-col animate-in fade-in duration-500">
             <h3 className="text-xl font-bold">Return Scheduling</h3>
             {!state.isScheduled ? (
                 <div className="flex-1 space-y-6">
                     <div className="bg-zinc-900 p-6 rounded-3xl border border-zinc-800">
                         <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mb-4">Select Location</p>
-                        <div className="flex items-center space-x-4"><div className="w-10 h-10 bg-zinc-800 rounded-full flex items-center justify-center"><ICONS.Bot className="w-5 h-5 text-blue-500" /></div><div><p className="text-sm font-bold">Tesla Palo Alto</p><p className="text-xs text-zinc-500">1.2 miles away</p></div></div>
+                        <div className="flex items-center space-x-4">
+                            <div className="w-10 h-10 bg-zinc-800 rounded-full flex items-center justify-center border border-zinc-700"><ICONS.Bot className="w-5 h-5 text-blue-500" /></div>
+                            <div><p className="text-sm font-bold">Tesla Palo Alto</p><p className="text-xs text-zinc-500">1.2 miles away • Preferred</p></div>
+                        </div>
                     </div>
                     <div className="bg-zinc-900 p-6 rounded-3xl border border-zinc-800">
                         <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mb-4">Select Date</p>
                         <div className="grid grid-cols-4 gap-2">
                             {['Jun 14', 'Jun 15', 'Jun 16', 'Jun 17'].map(d => (
-                                <button key={d} onClick={() => setLocalSelectedDate(d)} className={`py-3 rounded-xl text-[10px] font-bold transition-all ${localSelectedDate === d ? 'bg-white text-black' : 'bg-zinc-800 text-gray-400 active:bg-zinc-700'}`}>{d}</button>
+                                <button key={d} onClick={() => setLocalSelectedDate(d)} className={`py-4 rounded-xl text-[10px] font-bold transition-all border ${localSelectedDate === d ? 'bg-white text-black border-white' : 'bg-zinc-800 text-gray-400 border-zinc-700 active:bg-zinc-700'}`}>{d}</button>
                             ))}
                         </div>
                     </div>
-                    <Button disabled={!localSelectedDate} onClick={() => setState(s => ({ ...s, isScheduled: true, scheduledDate: localSelectedDate }))}>Schedule Return</Button>
+                    <Button disabled={!localSelectedDate} onClick={() => setState(s => ({ ...s, isScheduled: true, scheduledDate: localSelectedDate }))}>Confirm Appointment</Button>
                 </div>
             ) : (
                 <div className="flex-1 flex flex-col justify-center items-center text-center">
-                    <div className="w-20 h-20 bg-zinc-900 rounded-full flex items-center justify-center mb-6"><ICONS.Check className="w-10 h-10 text-blue-500" /></div>
-                    <h4 className="text-lg font-bold">Return Scheduled</h4>
+                    <div className="w-24 h-24 bg-zinc-900 rounded-full flex items-center justify-center mb-6 border border-zinc-800"><ICONS.Check className="w-12 h-12 text-blue-500" /></div>
+                    <h4 className="text-xl font-bold">Return Confirmed</h4>
                     <p className="text-sm text-zinc-500 mt-2">{state.scheduledDate} at 2:00 PM</p>
-                    <p className="text-xs text-zinc-600 mt-1">Tesla Palo Alto</p>
-                    <Button variant="ghost" className="mt-8" onClick={() => setState(s => ({ ...s, isScheduled: false }))}>Reschedule</Button>
+                    <p className="text-xs text-zinc-600 mt-1 uppercase tracking-widest">Tesla Palo Alto</p>
+                    <div className="mt-12 w-full space-y-3">
+                        <Button variant="ghost" onClick={() => setState(s => ({ ...s, isScheduled: false }))}>Reschedule</Button>
+                        <Button variant="primary" onClick={() => setSubTab('Overview')}>Back to Overview</Button>
+                    </div>
                 </div>
             )}
         </div>
@@ -530,10 +586,13 @@ const LeaseManagement: React.FC<{
             {showSuccessScreen && renderSuccessScreen()}
             {paymentConfirmed && renderPaymentConfirmation()}
             {showSurvey && renderSurveyModal()}
+            <LeaseChatModal isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} leaseState={state} />
+            
             <header className="p-6 flex justify-between items-center border-b border-zinc-900 bg-black/50 backdrop-blur-xl">
                 <button onClick={() => { if (subTab === 'Overview') onBack(); else setSubTab('Overview'); }} className="text-gray-400 active:text-white font-bold text-xs uppercase tracking-widest">Back</button>
-                <h2 className="text-sm font-bold uppercase tracking-[0.3em]">{subTab === 'Overview' ? 'Lease Management' : subTab === 'Billing' ? 'Billing' : subTab === 'BillBreakdown' ? 'Final Bill' : subTab}</h2><div className="w-8"></div>
+                <h2 className="text-sm font-bold uppercase tracking-[0.3em]">{subTab === 'Overview' ? 'Lease Management' : subTab === 'BillBreakdown' ? 'Final Bill' : subTab}</h2><div className="w-8"></div>
             </header>
+            
             <div className={`flex-1 overflow-y-auto p-6 pb-24 ${isPostReturn ? 'pt-2' : ''}`}>
                 {subTab === 'Overview' && renderOverview()}
                 {subTab === 'Inspection' && renderInspection()}
@@ -541,16 +600,28 @@ const LeaseManagement: React.FC<{
                 {subTab === 'Schedule' && renderSchedule()}
                 {subTab === 'BillBreakdown' && renderBillBreakdown()}
                 {subTab === 'Billing' && (
-                    <div className="space-y-6"><h3 className="text-xl font-bold">Documents & Billing</h3><div className="space-y-2"><MenuCard icon={<ICONS.Bot className="w-4 h-4" />} title="Lease Agreement" subtitle="Signed Jun 2021" /><MenuCard icon={<ICONS.Bot className="w-4 h-4" />} title="Return Statement" subtitle={isBillReady ? (isPaid ? "Paid - Receipt Available" : "Ready - View Summary") : "Pending final return"} onClick={isBillReady ? () => setSubTab('BillBreakdown') : undefined} /></div></div>
+                    <div className="space-y-6"><h3 className="text-xl font-bold">Documents</h3><div className="space-y-2"><MenuCard icon={<ICONS.Bot className="w-4 h-4" />} title="Lease Agreement" subtitle="Signed Jun 2021" /><MenuCard icon={<ICONS.Bot className="w-4 h-4" />} title="Return Statement" subtitle={isBillReady ? (isPaid ? "Paid - Receipt Available" : "Ready - View Summary") : "Pending final return"} onClick={isBillReady ? () => setSubTab('BillBreakdown') : undefined} /></div></div>
                 )}
             </div>
+
+            {/* Floating Support Button */}
+            <button 
+                onClick={() => setIsChatOpen(true)}
+                className="absolute bottom-10 right-6 w-14 h-14 bg-blue-600 rounded-full flex items-center justify-center shadow-2xl shadow-blue-900/40 active:scale-90 transition-all z-40 border border-blue-400/20"
+            >
+                <div className="relative">
+                    <ICONS.Bot className="w-7 h-7 text-white" />
+                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-blue-600"></div>
+                </div>
+            </button>
+
             <div className="absolute bottom-0 left-0 w-full z-[100] px-4 py-1.5 bg-zinc-900/90 backdrop-blur-xl border-t border-zinc-800 flex items-center justify-between text-[7px] font-black uppercase text-zinc-600">
                 <span className="tracking-tighter">PROTO_CTRL</span>
                 <div className="flex space-x-2">
-                    <button onClick={() => { setSubTab('Overview'); setIsBillReady(false); setIsPaid(false); setState(s => ({ ...s, daysLeft: 70, isReturned: false })); }} className={`px-2 py-0.5 rounded ${state.daysLeft > 60 ? 'bg-white/10 text-white' : ''}`}>Pre-60</button>
-                    <button onClick={() => { setSubTab('Overview'); setIsBillReady(false); setIsPaid(false); setState(s => ({ ...s, daysLeft: 58, isReturned: false })); }} className={`px-2 py-0.5 rounded ${state.daysLeft <= 60 && state.daysLeft > 0 ? 'bg-white/10 text-white' : ''}`}>T-60</button>
-                    <button onClick={() => { setSubTab('Overview'); setIsBillReady(false); setIsPaid(false); setState(s => ({ ...s, daysLeft: 0, isReturned: false })); }} className={`px-2 py-0.5 rounded ${state.daysLeft === 0 ? 'bg-tesla-red text-white' : ''}`}>T-0</button>
-                    <button onClick={() => { setSubTab('Overview'); setIsBillReady(false); setIsPaid(false); setState(s => ({ ...s, daysLeft: -1, isReturned: true, isInspectionComplete: true, isScheduled: true, hasKeys: true, hasPersonalItemsRemoved: true })); }} className={`px-2 py-0.5 rounded ${state.daysLeft < 0 ? 'bg-green-600 text-white' : ''}`}>T+1</button>
+                    <button onClick={() => { setSubTab('Overview'); setIsBillReady(false); setIsPaid(false); setShowSurvey(false); setSurveySubmitted(false); setState(s => ({ ...s, daysLeft: 70, isReturned: false })); }} className={`px-2 py-0.5 rounded ${state.daysLeft > 60 ? 'bg-white/10 text-white' : ''}`}>Pre-60</button>
+                    <button onClick={() => { setSubTab('Overview'); setIsBillReady(false); setIsPaid(false); setShowSurvey(false); setSurveySubmitted(false); setState(s => ({ ...s, daysLeft: 58, isReturned: false })); }} className={`px-2 py-0.5 rounded ${state.daysLeft <= 60 && state.daysLeft > 0 ? 'bg-white/10 text-white' : ''}`}>T-60</button>
+                    <button onClick={() => { setSubTab('Overview'); setIsBillReady(false); setIsPaid(false); setShowSurvey(false); setSurveySubmitted(false); setState(s => ({ ...s, daysLeft: 0, isReturned: false })); }} className={`px-2 py-0.5 rounded ${state.daysLeft === 0 ? 'bg-tesla-red text-white' : ''}`}>T-0</button>
+                    <button onClick={() => { setSubTab('Overview'); setIsBillReady(false); setIsPaid(false); setShowSurvey(false); setSurveySubmitted(false); setState(s => ({ ...s, daysLeft: -1, isReturned: true, isInspectionComplete: true, isScheduled: true, hasKeys: true, hasPersonalItemsRemoved: true })); }} className={`px-2 py-0.5 rounded ${state.daysLeft < 0 ? 'bg-green-600 text-white' : ''}`}>T+1</button>
                 </div>
             </div>
         </div>
@@ -643,7 +714,20 @@ export default function App() {
         {activeTab === 'Financing' && (
             <div className="p-6 pt-16 animate-in slide-in-from-right duration-500 h-full overflow-hidden flex flex-col">
                 <header className="flex justify-between items-center mb-8"><button onClick={() => setActiveTab('Home')} className="text-sm font-bold uppercase tracking-widest text-zinc-500 active:text-white">Back</button><h2 className="text-xl font-bold">Financing</h2><div className="w-8"></div></header>
-                <div className="space-y-4 flex-1 overflow-y-auto"><div className="bg-zinc-900 rounded-3xl p-6 border border-zinc-800"><p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mb-1">Active Lease</p><h3 className="text-lg font-bold">{vState.model}</h3><p className="text-sm text-zinc-400 mt-2">{lState.daysLeft < 0 ? 'Lease terminated' : `${lState.daysLeft} days remaining in term`}</p><Button className="mt-6" onClick={() => setActiveTab('LeaseManagement')}>Lease Management</Button></div><MenuCard icon={<ICONS.Check className="w-4 h-4" />} title="Payment History" subtitle="Last payment: May 15" /><MenuCard icon={<ICONS.Dollar className="w-4 h-4" />} title="Billing Statements" /></div>
+                <div className="space-y-4 flex-1 overflow-y-auto">
+                    <div className="bg-zinc-900 rounded-3xl p-6 border border-zinc-800">
+                        <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mb-1">Active Lease</p>
+                        <h3 className="text-lg font-bold">{vState.model}</h3>
+                        <p className="text-sm text-zinc-400 mt-2">{lState.daysLeft < 0 ? 'Lease terminated' : `${lState.daysLeft} days remaining in term`}</p>
+                        <div className="mt-4 pt-4 border-t border-zinc-800/50 flex justify-between items-center">
+                            <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Odometer</span>
+                            <span className="text-xs font-bold">{lState.currentMileage.toLocaleString()} mi</span>
+                        </div>
+                        <Button className="mt-6" onClick={() => setActiveTab('LeaseManagement')}>Lease Management</Button>
+                    </div>
+                    <MenuCard icon={<ICONS.Check className="w-4 h-4" />} title="Payment History" subtitle="Last payment: May 15" />
+                    <MenuCard icon={<ICONS.Dollar className="w-4 h-4" />} title="Billing Statements" />
+                </div>
             </div>
         )}
         {activeTab === 'LeaseManagement' && <LeaseManagement state={lState} setState={setLState} onBack={() => setActiveTab('Financing')} />}
