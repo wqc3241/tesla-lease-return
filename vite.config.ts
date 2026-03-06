@@ -8,6 +8,7 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        allowedHosts: ['beckoningly-photovoltaic-elisa.ngrok-free.dev'],
       },
       plugins: [react()],
       define: {

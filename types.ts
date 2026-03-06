@@ -14,11 +14,14 @@ export interface VehicleState {
   odometer: number;
 }
 
+export type Lender = 'U.S. Bank' | 'Chase' | 'Santander' | 'Ally' | 'Tesla Finance';
+
 export interface LeaseState {
   termMonths: number;
   startDate: string;
   maturityDate: string;
   daysLeft: number;
+  lender: Lender;
   allowedMileage: number;
   currentMileage: number;
   isInspectionComplete: boolean;

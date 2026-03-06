@@ -2,6 +2,17 @@
 import React from 'react';
 import { VehicleState, LeaseState } from './types';
 
+export const WALKAROUND_ANGLES = [
+  { id: 'front', label: 'Front', instruction: 'Stand directly in front of the vehicle and capture the full front view.' },
+  { id: 'front-left', label: 'Front-Left', instruction: 'Move to the front-left corner at a 45° angle.' },
+  { id: 'driver-side', label: 'Driver Side', instruction: 'Stand at the center of the driver side, capturing the full profile.' },
+  { id: 'rear-left', label: 'Rear-Left', instruction: 'Move to the rear-left corner at a 45° angle.' },
+  { id: 'rear', label: 'Rear', instruction: 'Stand directly behind the vehicle and capture the full rear view.' },
+  { id: 'rear-right', label: 'Rear-Right', instruction: 'Move to the rear-right corner at a 45° angle.' },
+  { id: 'passenger-side', label: 'Passenger Side', instruction: 'Stand at the center of the passenger side, capturing the full profile.' },
+  { id: 'front-right', label: 'Front-Right', instruction: 'Move to the front-right corner at a 45° angle.' },
+] as const;
+
 export const INITIAL_VEHICLE_STATE: VehicleState = {
   name: 'Cybership',
   model: 'Model 3 Performance',
@@ -22,6 +33,7 @@ export const INITIAL_LEASE_STATE: LeaseState = {
   startDate: '2021-06-15',
   maturityDate: '2024-06-15',
   daysLeft: 58,
+  lender: 'Tesla Finance',
   allowedMileage: 30000,
   currentMileage: 27450,
   isInspectionComplete: false,
@@ -115,6 +127,14 @@ export const ICONS = {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
       <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
       <circle cx="12" cy="13" r="4" />
+    </svg>
+  ),
+  Mic: (props: any) => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <line x1="12" y1="19" x2="12" y2="23" />
+      <line x1="8" y1="23" x2="16" y2="23" />
     </svg>
   ),
 };

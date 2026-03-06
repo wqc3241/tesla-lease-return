@@ -6,8 +6,7 @@ export class GeminiService {
   private ai: GoogleGenAI;
 
   constructor() {
-    // Correctly initialize with API key from environment variable
-    this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
   }
 
   async getVehicleAdvice(prompt: string, state: VehicleState) {

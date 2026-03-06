@@ -1,8 +1,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { INITIAL_VEHICLE_STATE, INITIAL_LEASE_STATE, ICONS } from './constants';
+import { INITIAL_VEHICLE_STATE, INITIAL_LEASE_STATE, ICONS, WALKAROUND_ANGLES } from './constants';
 import { VehicleState, LeaseState, TabType, ChatMessage } from './types';
 import { gemini } from './geminiService';
+import { useSpeechRecognition } from './useSpeechRecognition';
 
 // --- Global UI Helpers ---
 
@@ -66,18 +67,123 @@ const TimelineItem: React.FC<{
   </div>
 );
 
-const LeaseChatModal: React.FC<{ 
-    isOpen: boolean; 
-    onClose: () => void; 
+const TESLA_LEASE_KNOWLEDGE = `
+TESLA LEASE SUPPORT KNOWLEDGE BASE (Official Tesla Policy)
+===========================================================
+
+## LEASE OVERVIEW
+- Tesla offers leasing on Model S, Model 3, Model X, Model Y, and Cybertruck.
+- Lease terms are typically 24 or 36 months.
+- Mileage packages: 10,000, 12,000, or 15,000 miles per year.
+- Excess mileage fee: $0.25 per mile over the allowance.
+- Tesla Financial does NOT charge a disposition fee for standard lease returns (some third-party lessors may charge ~$395).
+
+## INSURANCE REQUIREMENTS
+- Must list Tesla Lease Trust as lienholder and additional insured.
+- Minimum coverage: $50,000 property damage, $100,000 bodily injury per person, $300,000 per accident.
+- Physical damage insurance for the full value of the vehicle.
+- Maximum deductible: $2,500.
+
+## END-OF-LEASE OPTIONS
+1. **Return the Vehicle** – Return it at a Tesla Service Center. Tesla contacts you 30-60 days before maturity.
+2. **Purchase/Buyout** – You can buy your leased vehicle at lease end. Access via the Tesla app: Financing → Lease Details → Manage Lease → Purchase Vehicle. Not available in Iowa and Louisiana.
+3. **Lease Extension** – Extend up to 6 months if your account is in good standing. Extensions can only be granted once.
+4. **Start a New Lease** – Upgrade to a new Tesla with potential loyalty credits.
+5. **Third-Party Sale** – Third-party dealerships may also purchase your leased vehicle.
+
+## LEASE RETURN PROCESS (Step by Step)
+1. Tesla contacts you 30-60 days before your maturity date.
+2. Open the Tesla app to start your lease return process.
+3. Complete the Pre-Return Inspection: submit photos of your vehicle from multiple angles.
+4. Tesla assesses wear and tear using the Excess Wear and Use Guide.
+5. End-of-term charges (if any) appear in the Tesla app within 2 business days.
+6. You may repair excess wear before the final inspection to avoid charges.
+7. Schedule your drop-off appointment at a Tesla Service Center.
+8. Before drop-off: clear personal data and restore to factory settings.
+9. At drop-off: remit any payment due and submit an odometer disclosure.
+10. Return all accessories: charging cable, key cards, front license plate bracket (missing items: up to $450 replacement fee each).
+
+## EXCESS WEAR AND USE GUIDE
+**Normal Wear (No Charge):**
+- A few small door dings, minor chips, or light scratches expected from normal use.
+- Small stone chips on the front bumper or hood.
+
+**Excess Wear (May Incur Charges):**
+- Dents larger than a quarter.
+- Cracks in glass (windshield, windows, mirrors).
+- Tears, burns, or stains in upholstery or interior surfaces.
+- Poor-quality or improper repairs.
+- Multiple scratches or scratches that break through the paint.
+
+**Wheels:**
+- Normal: Scratches less than 6" cumulative per wheel.
+- Excess: 3 or more scratches/gouges/dents per wheel, bent or broken parts, missing/corroded wheel covers, mismatched wheels.
+
+**Tires:**
+- Tread must be 4/32" or greater.
+- Penny test: place a penny upside-down in the lowest tread – if tread covers Lincoln's face, it's acceptable.
+- All four tires must be the same brand and size as originally equipped (or equivalent).
+- Mismatched or incorrect tire sizes are considered excess wear.
+
+## EARLY LEASE TERMINATION
+- Allowed if you have one or more payments remaining (can be costly).
+- **Less than 3 months remaining:** Pay your remaining lease balance plus any end-of-term charges via the Tesla Leasing Portal.
+- **3 or more months remaining:** Pay the difference between adjusted lease balance and current market value.
+- Early termination quotes are available in the Tesla app and valid until the day before your next payment due date.
+- You still must complete a final inspection and return the vehicle.
+
+## BILLING & PAYMENTS
+- Monthly payments are due on the date specified in your lease agreement.
+- Late payments may incur fees per your lease terms.
+- Final bill includes: remaining payments (if early termination), excess wear charges, mileage overage, minus any loyalty credits.
+- Payment methods: accepted via the Tesla app or Tesla Leasing Portal.
+`.trim();
+
+const getChatConfig = (daysLeft: number): { greeting: string; quickActions: { label: string; prompt: string }[] } => {
+    if (daysLeft < 0) {
+        return {
+            greeting: "Hello, how can I help you with your lease return or billing today?",
+            quickActions: [
+                { label: "Final Bill", prompt: "What is my final bill breakdown?" },
+                { label: "End Options", prompt: "What are my lease end options?" },
+                { label: "Feedback", prompt: "I'd like to provide feedback about my lease return experience." },
+            ],
+        };
+    }
+    const baseActions = [
+        { label: "Return Process", prompt: "What is the lease return process?" },
+        { label: "Wear & Tear", prompt: "What are the wear and tear guidelines?" },
+        { label: "End Options", prompt: "What are my lease end options?" },
+    ];
+    if (daysLeft <= 60) {
+        baseActions.push({ label: "Current Offers", prompt: "What current offers are available for my lease?" });
+    }
+    return {
+        greeting: "Hello, how can I help you with your lease?",
+        quickActions: baseActions,
+    };
+};
+
+const LeaseChatModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
     leaseState: LeaseState;
 }> = ({ isOpen, onClose, leaseState }) => {
+    const chatConfig = getChatConfig(leaseState.daysLeft);
     const [messages, setMessages] = useState<ChatMessage[]>([
-        { role: 'model', text: "Hello, I'm your Tesla Financial Assistant. How can I help with your lease return or billing today?" }
+        { role: 'model', text: chatConfig.greeting }
     ]);
     const [input, setInput] = useState('');
     const [isTyping, setIsTyping] = useState(false);
     const [isCalling, setIsCalling] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
+    const { isListening, isSupported, error: voiceError, toggleListening } = useSpeechRecognition({
+        onTranscript: (text) => setInput(text),
+    });
+
+    useEffect(() => {
+        setMessages([{ role: 'model', text: getChatConfig(leaseState.daysLeft).greeting }]);
+    }, [leaseState.daysLeft]);
 
     useEffect(() => {
         if (scrollRef.current) {
@@ -94,10 +200,24 @@ const LeaseChatModal: React.FC<{
         setInput('');
         setIsTyping(true);
 
-        // Contextual prompt for Lease
-        const contextualPrompt = `Lease Context: Days left: ${leaseState.daysLeft}, Mileage: ${leaseState.currentMileage}/${leaseState.allowedMileage}. 
-        User Query: ${textToSend}. 
-        Focus on return process, billing disputes, or loyalty offers.`;
+        const contextualPrompt = `You are Tesla's official Lease Support AI Assistant. Answer questions accurately using ONLY the knowledge base below. If a question falls outside the knowledge base, say you can connect them with a Tesla advisor.
+
+RESPONSE FORMAT RULES:
+- Keep answers to 2-4 short sentences max.
+- Use bullet points for lists instead of long paragraphs.
+- Never repeat the user's question back to them.
+- Be direct — lead with the answer, not filler.
+
+${TESLA_LEASE_KNOWLEDGE}
+
+CURRENT CUSTOMER LEASE STATUS:
+- Days until maturity: ${leaseState.daysLeft}
+- Mileage: ${leaseState.currentMileage.toLocaleString()} / ${leaseState.allowedMileage.toLocaleString()} miles
+- Inspection complete: ${leaseState.isInspectionComplete ? 'Yes' : 'No'}
+- Return scheduled: ${leaseState.isScheduled ? 'Yes' : 'No'}
+- Selected option: ${leaseState.selectedOption || 'None yet'}
+
+Customer question: ${textToSend}`;
 
         const response = await gemini.getVehicleAdvice(contextualPrompt, INITIAL_VEHICLE_STATE);
         setMessages(prev => [...prev, { role: 'model', text: response }]);
@@ -146,7 +266,15 @@ const LeaseChatModal: React.FC<{
                 {messages.map((m, i) => (
                     <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                         <div className={`max-w-[85%] px-5 py-3.5 rounded-3xl text-sm leading-relaxed shadow-sm ${m.role === 'user' ? 'bg-white text-black font-medium' : 'bg-zinc-900 text-zinc-300 border border-zinc-800'}`}>
-                            {m.text}
+                            {m.role === 'user' ? m.text : (
+                                <div className="space-y-2" dangerouslySetInnerHTML={{ __html: m.text
+                                    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                                    .replace(/^[-•]\s+(.+)$/gm, '<li class="ml-3 list-disc">$1</li>')
+                                    .replace(/(<li[^>]*>.*<\/li>\n?)+/g, (match) => `<ul class="space-y-1">${match}</ul>`)
+                                    .replace(/\n{2,}/g, '<br/><br/>')
+                                    .replace(/\n/g, '<br/>')
+                                }} />
+                            )}
                         </div>
                     </div>
                 ))}
@@ -163,28 +291,39 @@ const LeaseChatModal: React.FC<{
 
             <div className="p-4 bg-zinc-950 border-t border-zinc-900 space-y-4">
                 <div className="flex gap-2 overflow-x-auto pb-2 px-1 no-scrollbar">
-                    <button onClick={() => handleSend("I want to dispute a damage charge.")} className="whitespace-now8 bg-zinc-900 border border-zinc-800 text-[10px] font-bold uppercase tracking-widest px-4 py-2 rounded-full active:bg-zinc-800 flex-shrink-0">Dispute Charge</button>
-                    <button onClick={() => handleSend("What are my options after return?")} className="whitespace-nowrap bg-zinc-900 border border-zinc-800 text-[10px] font-bold uppercase tracking-widest px-4 py-2 rounded-full active:bg-zinc-800 flex-shrink-0">Loyalty Options</button>
+                    {chatConfig.quickActions.map((action) => (
+                        <button key={action.label} onClick={() => handleSend(action.prompt)} className="whitespace-nowrap bg-zinc-900 border border-zinc-800 text-[10px] font-bold uppercase tracking-widest px-4 py-2 rounded-full active:bg-zinc-800 flex-shrink-0">{action.label}</button>
+                    ))}
                     <button onClick={() => setIsCalling(true)} className="whitespace-nowrap bg-blue-600/10 border border-blue-500/20 text-blue-500 text-[10px] font-bold uppercase tracking-widest px-4 py-2 rounded-full active:bg-blue-600/20 flex-shrink-0 flex items-center gap-2">
                         <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M6.62,10.79C8.06,13.62 10.38,15.94 13.21,17.38L15.41,15.18C15.69,14.9 16.08,14.82 16.43,14.93C17.55,15.3 18.75,15.5 20,15.5A1,1 0 0,1 21,16.5V20A1,1 0 0,1 20,21A17,17 0 0,1 3,4A1,1 0 0,1 4,3H7.5A1,1 0 0,1 8.5,4C8.5,5.25 8.7,6.45 9.07,7.57C9.18,7.92 9.1,8.31 8.82,8.59L6.62,10.79Z" /></svg>
                         Call AI Voice Support
                     </button>
                 </div>
                 <div className="flex gap-3">
-                    <input 
-                        className="flex-1 bg-zinc-900 border border-zinc-800 rounded-2xl px-5 py-3.5 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm placeholder-zinc-600" 
-                        placeholder="Message support..." 
-                        value={input} 
-                        onChange={(e) => setInput(e.target.value)} 
-                        onKeyDown={(e) => e.key === 'Enter' && handleSend()} 
+                    <input
+                        className="flex-1 bg-zinc-900 border border-zinc-800 rounded-2xl px-5 py-3.5 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm placeholder-zinc-600"
+                        placeholder={isListening ? "Listening..." : "Message support..."}
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleSend()}
                     />
-                    <button 
-                        onClick={() => handleSend()} 
+                    {isSupported && (
+                        <button
+                            onClick={toggleListening}
+                            className={`w-12 h-12 rounded-2xl flex items-center justify-center active:scale-95 transition-all relative ${isListening ? 'bg-tesla-red text-white' : 'bg-zinc-800 text-zinc-400'}`}
+                        >
+                            {isListening && <span className="absolute inset-0 bg-tesla-red rounded-2xl animate-ping opacity-30"></span>}
+                            <ICONS.Mic className="w-5 h-5 relative z-10" />
+                        </button>
+                    )}
+                    <button
+                        onClick={() => handleSend()}
                         className="w-12 h-12 bg-white text-black rounded-2xl flex items-center justify-center active:scale-95 transition-all shadow-lg"
                     >
                         <ICONS.ChevronRight className="w-6 h-6" />
                     </button>
                 </div>
+                {voiceError && <p className="text-xs text-red-400 px-1">{voiceError}</p>}
             </div>
         </div>
     );
@@ -210,8 +349,77 @@ const LeaseManagement: React.FC<{
     const [paymentConfirmed, setPaymentConfirmed] = useState(false);
     const [isChatOpen, setIsChatOpen] = useState(false);
 
+    // Camera walkaround state
+    const [cameraAngleIndex, setCameraAngleIndex] = useState(0);
+    const [capturedImages, setCapturedImages] = useState<Record<string, string>>({});
+    const [cameraError, setCameraError] = useState<string | null>(null);
+    const [isCameraReady, setIsCameraReady] = useState(false);
+    const [showCaptureFlash, setShowCaptureFlash] = useState(false);
+    const videoRef = useRef<HTMLVideoElement>(null);
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const streamRef = useRef<MediaStream | null>(null);
+
     const isReturnDay = state.daysLeft === 0;
     const isPostReturn = state.isReturned || state.daysLeft < 0;
+
+    const stopCamera = () => {
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(t => t.stop());
+            streamRef.current = null;
+        }
+        if (videoRef.current) videoRef.current.srcObject = null;
+        setIsCameraReady(false);
+    };
+
+    const startCamera = async () => {
+        setCameraError(null);
+        setIsCameraReady(false);
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: { ideal: 'environment' } },
+            });
+            streamRef.current = stream;
+            if (videoRef.current) {
+                videoRef.current.srcObject = stream;
+                videoRef.current.onloadedmetadata = () => setIsCameraReady(true);
+            }
+        } catch (err: any) {
+            setCameraError(err?.message || 'Camera access denied');
+        }
+    };
+
+    const captureSnapshot = () => {
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        if (!video || !canvas) return;
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext('2d')?.drawImage(video, 0, 0);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        const angle = WALKAROUND_ANGLES[cameraAngleIndex];
+        setCapturedImages(prev => ({ ...prev, [angle.id]: dataUrl }));
+        setShowCaptureFlash(true);
+        setTimeout(() => setShowCaptureFlash(false), 200);
+    };
+
+    const handleConfirmCapture = () => {
+        if (cameraAngleIndex < WALKAROUND_ANGLES.length - 1) {
+            setCameraAngleIndex(i => i + 1);
+        } else {
+            stopCamera();
+            setWalkthroughStep(2);
+            setState(s => ({ ...s, isInspectionComplete: true }));
+        }
+    };
+
+    const handleRetakeCapture = () => {
+        const angle = WALKAROUND_ANGLES[cameraAngleIndex];
+        setCapturedImages(prev => {
+            const next = { ...prev };
+            delete next[angle.id];
+            return next;
+        });
+    };
 
     useEffect(() => {
         setIsReturning(false);
@@ -221,7 +429,16 @@ const LeaseManagement: React.FC<{
         setSurveyFeedback('');
         setWalkthroughStep(0);
         setLocalSelectedDate(state.scheduledDate);
+        // Clean up camera on tab change
+        stopCamera();
+        setCameraAngleIndex(0);
+        setCapturedImages({});
+        setCameraError(null);
     }, [state.daysLeft, subTab]);
+
+    useEffect(() => {
+        return () => stopCamera();
+    }, []);
 
     const handleLeaseReturn = () => {
         setShowSuccessScreen(true);
@@ -412,11 +629,24 @@ const LeaseManagement: React.FC<{
         return (
             <div className="space-y-6 animate-in fade-in duration-500">
                 <div className="bg-zinc-900 rounded-3xl p-6 border border-zinc-800">
-                    <div className="flex justify-between items-start mb-4">
+                    <div className="flex justify-between items-start mb-2">
                         <div><p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Lease Status</p><h3 className="text-xl font-semibold mt-1">36-Month Lease</h3></div>
                         <div className="text-right"><p className={`text-sm font-bold ${state.daysLeft <= 10 && state.daysLeft >= 0 ? 'tesla-red' : 'text-blue-400'}`}>{isReturnDay ? 'DUE TODAY' : `${state.daysLeft} DAYS LEFT`}</p></div>
                     </div>
-                    
+                    <div className="flex justify-between text-xs mb-4">
+                        <span className="text-zinc-500 font-bold uppercase tracking-widest">Lender</span>
+                        <button
+                            onClick={() => {
+                                const lenders: LeaseState['lender'][] = ['U.S. Bank', 'Chase', 'Santander', 'Ally', 'Tesla Finance'];
+                                const idx = lenders.indexOf(state.lender);
+                                setState(s => ({ ...s, lender: lenders[(idx + 1) % lenders.length] }));
+                            }}
+                            className="font-semibold text-blue-400 active:text-blue-300 transition-colors"
+                        >
+                            {state.lender}
+                        </button>
+                    </div>
+
                     <div className="space-y-6 pt-4 border-t border-zinc-800/50">
                         <div className="flex justify-between text-xs">
                             <span className="text-zinc-500 font-bold uppercase tracking-widest">Maturity Date</span>
@@ -445,6 +675,7 @@ const LeaseManagement: React.FC<{
                     </div>
                 </div>
 
+                {state.daysLeft <= 60 && (
                 <div className="space-y-3">
                     <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-widest px-1">Next Steps</h4>
                     {isReturnDay && !isReturning && (<Button variant="primary" onClick={() => setIsReturning(true)} className="mb-4 shadow-[0_4px_20px_rgba(255,255,255,0.1)]">Starting Return</Button>)}
@@ -453,6 +684,7 @@ const LeaseManagement: React.FC<{
                     <MenuCard icon={<ICONS.Calendar className="w-5 h-5" />} title="Schedule Return" subtitle={state.isScheduled ? "Confirmed" : "Select location and time"} onClick={() => setSubTab('Schedule')} />
                     <MenuCard icon={<ICONS.Bot className="w-5 h-5" />} title="Documents & Billing" subtitle="View lease agreement and final statements" onClick={() => setSubTab('Billing')} />
                 </div>
+                )}
             </div>
         );
     };
@@ -475,28 +707,139 @@ const LeaseManagement: React.FC<{
       </div>
     );
 
-    const renderInspection = () => (
+    const renderInspection = () => {
+        const currentAngle = WALKAROUND_ANGLES[cameraAngleIndex];
+        const hasCaptured = currentAngle && !!capturedImages[currentAngle.id];
+        const totalAngles = WALKAROUND_ANGLES.length;
+        const progressPercent = (cameraAngleIndex / totalAngles) * 100;
+
+        return (
         <div className="space-y-6 h-full flex flex-col animate-in fade-in duration-500">
+            <style>{`@keyframes captureFlash { from { opacity: 0.9; } to { opacity: 0; } }`}</style>
             <h3 className="text-xl font-bold">Pre-Inspection Walkthrough</h3>
+
+            {/* Step 0 — Intro */}
             {walkthroughStep === 0 && (
                 <div className="flex-1 flex flex-col justify-center items-center text-center px-4">
                     <div className="w-32 h-32 bg-zinc-900 rounded-full flex items-center justify-center mb-6 border border-zinc-800"><ICONS.Camera className="w-12 h-12 text-blue-500" /></div>
-                    <p className="text-sm text-zinc-400 mb-8 leading-relaxed">We'll guide you through a virtual scan of your vehicle to estimate potential wear and tear before return.</p>
-                    <Button onClick={() => setWalkthroughStep(1)}>Start Walkthrough</Button>
+                    <p className="text-sm text-zinc-400 mb-8 leading-relaxed">We'll guide you through photographing your vehicle from 8 angles to estimate potential wear and tear before return.</p>
+                    <Button onClick={() => { startCamera(); setWalkthroughStep(1); }}>Start Walkthrough</Button>
                 </div>
             )}
+
+            {/* Step 1 — Live camera walkaround */}
             {walkthroughStep === 1 && (
-                <div className="flex-1 relative bg-zinc-950 rounded-3xl overflow-hidden border border-zinc-800">
-                    <img src="https://images.unsplash.com/photo-1536700503339-1e4b06520771?auto=format&fit=crop&q=80&w=800" className="w-full h-full object-cover opacity-40 grayscale" />
-                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40">
-                        <div className="w-64 h-64 border-2 border-white/10 rounded-full flex items-center justify-center animate-pulse"><div className="w-48 h-48 border-2 border-blue-500/30 rounded-full" /></div>
-                        <div className="mt-8 px-6 py-2 bg-blue-600/20 backdrop-blur rounded-full border border-blue-500/30 text-[10px] font-bold tracking-widest uppercase animate-pulse">Scanning Front Fascia... 62%</div>
+                <div className="flex-1 relative bg-zinc-950 rounded-3xl overflow-hidden border border-zinc-800 flex flex-col">
+                    {/* Progress bar */}
+                    <button className="w-full px-4 pt-4 pb-2 text-left" onClick={() => {
+                        if (cameraAngleIndex < totalAngles - 1) {
+                            setCameraAngleIndex(i => i + 1);
+                        } else {
+                            stopCamera();
+                            setWalkthroughStep(2);
+                            setState(s => ({ ...s, isInspectionComplete: true }));
+                        }
+                    }}>
+                        <div className="flex justify-between items-center mb-2">
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Angle {cameraAngleIndex + 1} of {totalAngles}</span>
+                            <span className="text-[10px] font-bold text-blue-400">{currentAngle.label}</span>
+                        </div>
+                        <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden">
+                            <div className="h-full bg-blue-500 rounded-full transition-all duration-500" style={{ width: `${progressPercent}%` }} />
+                        </div>
+                    </button>
+
+                    {/* Camera / Preview area */}
+                    <div className="flex-1 relative bg-black">
+                        {/* Live video feed */}
+                        <video
+                            ref={videoRef}
+                            autoPlay
+                            playsInline
+                            muted
+                            className={`w-full h-full object-cover ${hasCaptured ? 'hidden' : ''}`}
+                        />
+                        {/* Captured image preview */}
+                        {hasCaptured && (
+                            <img src={capturedImages[currentAngle.id]} className="w-full h-full object-cover" />
+                        )}
+
+                        {/* Camera loading spinner */}
+                        {!isCameraReady && !cameraError && !hasCaptured && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black">
+                                <div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                            </div>
+                        )}
+
+                        {/* Capture flash overlay */}
+                        {showCaptureFlash && (
+                            <div className="absolute inset-0 bg-white pointer-events-none" style={{ animation: 'captureFlash 200ms ease-out forwards' }} />
+                        )}
+
+                        {/* Error state */}
+                        {cameraError && (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black px-6 text-center">
+                                <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mb-4">
+                                    <span className="text-red-400 text-2xl font-bold">!</span>
+                                </div>
+                                <p className="text-sm text-zinc-300 mb-2">Camera Error</p>
+                                <p className="text-xs text-zinc-500 mb-6">{cameraError}</p>
+                                <div className="flex gap-3 w-full">
+                                    <button onClick={() => { stopCamera(); setWalkthroughStep(0); setCameraAngleIndex(0); setCapturedImages({}); }} className="flex-1 py-3 rounded-xl text-xs font-bold bg-zinc-800 text-white">Go Back</button>
+                                    <button onClick={startCamera} className="flex-1 py-3 rounded-xl text-xs font-bold bg-blue-600 text-white">Retry</button>
+                                </div>
+                            </div>
+                        )}
                     </div>
-                    <Button className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[80%]" onClick={() => { setWalkthroughStep(2); setState(s => ({ ...s, isInspectionComplete: true })); }}>Simulate Scan Complete</Button>
+
+                    {/* Bottom overlay — instruction + controls */}
+                    {!cameraError && (
+                        <div className="p-4 bg-gradient-to-t from-black/90 to-transparent">
+                            <p className="text-xs text-zinc-300 text-center mb-4">{currentAngle.instruction}</p>
+                            {!hasCaptured ? (
+                                <div className="flex justify-center">
+                                    <button
+                                        onClick={captureSnapshot}
+                                        disabled={!isCameraReady}
+                                        className="w-16 h-16 rounded-full border-4 border-white flex items-center justify-center active:scale-95 transition-transform disabled:opacity-40"
+                                    >
+                                        <div className="w-12 h-12 rounded-full bg-white" />
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="flex gap-3">
+                                    <button onClick={handleRetakeCapture} className="flex-1 py-3 rounded-xl text-xs font-bold bg-zinc-800 text-white active:bg-zinc-700">Retake</button>
+                                    <button onClick={handleConfirmCapture} className="flex-1 py-3 rounded-xl text-xs font-bold bg-blue-600 text-white active:bg-blue-700">
+                                        {cameraAngleIndex < totalAngles - 1 ? 'Next Angle' : 'Finish'}
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Hidden canvas for snapshot */}
+                    <canvas ref={canvasRef} className="hidden" />
                 </div>
             )}
+
+            {/* Step 2 — Estimate */}
             {walkthroughStep === 2 && (
                 <div className="flex-1 space-y-6 animate-in slide-in-from-bottom duration-700">
+                    {/* Thumbnail gallery */}
+                    {Object.keys(capturedImages).length > 0 && (
+                        <div className="bg-zinc-900/50 p-4 rounded-3xl border border-zinc-800">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-3">Captured Photos</p>
+                            <div className="grid grid-cols-4 gap-2">
+                                {WALKAROUND_ANGLES.map(a => (
+                                    capturedImages[a.id] ? (
+                                        <div key={a.id} className="aspect-square rounded-lg overflow-hidden border border-zinc-700">
+                                            <img src={capturedImages[a.id]} className="w-full h-full object-cover" />
+                                        </div>
+                                    ) : null
+                                ))}
+                            </div>
+                        </div>
+                    )}
                     <div className="bg-zinc-900/50 p-6 rounded-3xl border border-zinc-800">
                         <div className="flex justify-between items-center mb-6"><span className="text-xs font-bold uppercase tracking-widest text-zinc-500">Initial Estimate</span><span className="text-xl font-bold text-blue-400">$350 - $650</span></div>
                         <div className="space-y-4">
@@ -509,7 +852,8 @@ const LeaseManagement: React.FC<{
                 </div>
             )}
         </div>
-    );
+        );
+    };
 
     const renderOffers = () => {
         const offers = [
@@ -607,7 +951,7 @@ const LeaseManagement: React.FC<{
             {/* Floating Support Button */}
             <button 
                 onClick={() => setIsChatOpen(true)}
-                className="absolute bottom-10 right-6 w-14 h-14 bg-blue-600 rounded-full flex items-center justify-center shadow-2xl shadow-blue-900/40 active:scale-90 transition-all z-40 border border-blue-400/20"
+                className="fixed bottom-12 right-6 w-14 h-14 bg-blue-600 rounded-full flex items-center justify-center shadow-2xl shadow-blue-900/40 active:scale-90 transition-all z-[110] border border-blue-400/20"
             >
                 <div className="relative">
                     <ICONS.Bot className="w-7 h-7 text-white" />
@@ -615,13 +959,13 @@ const LeaseManagement: React.FC<{
                 </div>
             </button>
 
-            <div className="absolute bottom-0 left-0 w-full z-[100] px-4 py-1.5 bg-zinc-900/90 backdrop-blur-xl border-t border-zinc-800 flex items-center justify-between text-[7px] font-black uppercase text-zinc-600">
+            <div className="fixed bottom-0 left-0 w-full z-[100] px-4 py-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] bg-zinc-900/90 backdrop-blur-xl border-t border-zinc-800 flex items-center justify-between text-[7px] font-black uppercase text-zinc-600">
                 <span className="tracking-tighter">PROTO_CTRL</span>
                 <div className="flex space-x-2">
-                    <button onClick={() => { setSubTab('Overview'); setIsBillReady(false); setIsPaid(false); setShowSurvey(false); setSurveySubmitted(false); setState(s => ({ ...s, daysLeft: 70, isReturned: false })); }} className={`px-2 py-0.5 rounded ${state.daysLeft > 60 ? 'bg-white/10 text-white' : ''}`}>Pre-60</button>
-                    <button onClick={() => { setSubTab('Overview'); setIsBillReady(false); setIsPaid(false); setShowSurvey(false); setSurveySubmitted(false); setState(s => ({ ...s, daysLeft: 58, isReturned: false })); }} className={`px-2 py-0.5 rounded ${state.daysLeft <= 60 && state.daysLeft > 0 ? 'bg-white/10 text-white' : ''}`}>T-60</button>
-                    <button onClick={() => { setSubTab('Overview'); setIsBillReady(false); setIsPaid(false); setShowSurvey(false); setSurveySubmitted(false); setState(s => ({ ...s, daysLeft: 0, isReturned: false })); }} className={`px-2 py-0.5 rounded ${state.daysLeft === 0 ? 'bg-tesla-red text-white' : ''}`}>T-0</button>
-                    <button onClick={() => { setSubTab('Overview'); setIsBillReady(false); setIsPaid(false); setShowSurvey(false); setSurveySubmitted(false); setState(s => ({ ...s, daysLeft: -1, isReturned: true, isInspectionComplete: true, isScheduled: true, hasKeys: true, hasPersonalItemsRemoved: true })); }} className={`px-2 py-0.5 rounded ${state.daysLeft < 0 ? 'bg-green-600 text-white' : ''}`}>T+1</button>
+                    <button onClick={() => { setSubTab('Overview'); setIsBillReady(false); setIsPaid(false); setShowSurvey(false); setSurveySubmitted(false); setState(s => ({ ...s, daysLeft: 70, currentMileage: 18200, isReturned: false })); }} className={`px-2 py-0.5 rounded ${state.daysLeft > 60 ? 'bg-white/10 text-white' : ''}`}>Pre-60</button>
+                    <button onClick={() => { setSubTab('Overview'); setIsBillReady(false); setIsPaid(false); setShowSurvey(false); setSurveySubmitted(false); setState(s => ({ ...s, daysLeft: 58, currentMileage: 27450, isReturned: false })); }} className={`px-2 py-0.5 rounded ${state.daysLeft <= 60 && state.daysLeft > 0 ? 'bg-white/10 text-white' : ''}`}>T-60</button>
+                    <button onClick={() => { setSubTab('Overview'); setIsBillReady(false); setIsPaid(false); setShowSurvey(false); setSurveySubmitted(false); setState(s => ({ ...s, daysLeft: 0, currentMileage: 29800, isReturned: false })); }} className={`px-2 py-0.5 rounded ${state.daysLeft === 0 ? 'bg-tesla-red text-white' : ''}`}>T-0</button>
+                    <button onClick={() => { setSubTab('Overview'); setIsBillReady(false); setIsPaid(false); setShowSurvey(false); setSurveySubmitted(false); setState(s => ({ ...s, daysLeft: -1, currentMileage: 29800, isReturned: true, isInspectionComplete: true, isScheduled: true, hasKeys: true, hasPersonalItemsRemoved: true })); }} className={`px-2 py-0.5 rounded ${state.daysLeft < 0 ? 'bg-green-600 text-white' : ''}`}>T+1</button>
                 </div>
             </div>
         </div>
@@ -671,6 +1015,9 @@ const AssistantModal: React.FC<{ isOpen: boolean; onClose: () => void; state: Ve
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const { isListening: aIsListening, isSupported: aIsSupported, error: aVoiceError, toggleListening: aToggleListening } = useSpeechRecognition({
+    onTranscript: (text) => setInput(text),
+  });
   const handleSend = async () => {
     if (!input.trim()) return;
     const userMsg: ChatMessage = { role: 'user', text: input };
@@ -690,7 +1037,19 @@ const AssistantModal: React.FC<{ isOpen: boolean; onClose: () => void; state: Ve
         {messages.map((m, i) => (<div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[80%] px-4 py-2 rounded-2xl ${m.role === 'user' ? 'bg-tesla-red text-white' : 'bg-zinc-900 text-gray-200'}`}>{m.text}</div></div>))}
         {isTyping && (<div className="flex justify-start"><div className="bg-zinc-900 px-4 py-2 rounded-2xl animate-pulse text-gray-400">Thinking...</div></div>)}
       </div>
-      <div className="p-4 border-t border-zinc-900 bg-black"><div className="flex gap-2"><input className="flex-1 bg-zinc-900 rounded-full px-4 py-2 focus:outline-none text-sm" placeholder="Ask Tesla..." value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSend()} /><button onClick={handleSend} className="w-10 h-10 bg-tesla-red rounded-full flex items-center justify-center"><ICONS.ChevronRight className="w-5 h-5 text-white" /></button></div></div>
+      <div className="p-4 border-t border-zinc-900 bg-black">
+        <div className="flex gap-2">
+          <input className="flex-1 bg-zinc-900 rounded-full px-4 py-2 focus:outline-none text-sm" placeholder={aIsListening ? "Listening..." : "Ask Tesla..."} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSend()} />
+          {aIsSupported && (
+            <button onClick={aToggleListening} className={`w-10 h-10 rounded-full flex items-center justify-center active:scale-95 transition-all relative ${aIsListening ? 'bg-tesla-red' : 'bg-zinc-800 text-zinc-400'}`}>
+              {aIsListening && <span className="absolute inset-0 bg-tesla-red rounded-full animate-ping opacity-30"></span>}
+              <ICONS.Mic className="w-4 h-4 relative z-10" />
+            </button>
+          )}
+          <button onClick={handleSend} className="w-10 h-10 bg-tesla-red rounded-full flex items-center justify-center"><ICONS.ChevronRight className="w-5 h-5 text-white" /></button>
+        </div>
+        {aVoiceError && <p className="text-xs text-red-400 px-1 mt-2">{aVoiceError}</p>}
+      </div>
     </div>
   );
 };
@@ -705,7 +1064,7 @@ export default function App() {
   const handleTempChange = (newTemp: number) => setVState(prev => ({ ...prev, targetTemp: Math.max(60, Math.min(85, newTemp)) }));
   
   return (
-    <div className="relative w-full max-w-[430px] h-full max-h-[932px] bg-black text-white overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-zinc-800/50 md:rounded-[40px] flex flex-col">
+    <div className="relative w-full max-w-[430px] h-full md:max-h-[932px] bg-black text-white overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-zinc-800/50 md:rounded-[40px] flex flex-col">
       <div className="absolute top-0 left-0 w-full h-1/2 bg-gradient-to-b from-zinc-900/30 to-transparent -z-10" />
       <main className="flex-1 overflow-y-auto pb-24">
         {activeTab === 'Home' && (
